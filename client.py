@@ -6,7 +6,7 @@ https://docs.mosaic.so/api/introduction
 """
 
 import os
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 from datetime import datetime
 from enum import Enum
 
@@ -89,13 +89,64 @@ class CreateAgentRequest(BaseModel):
     graph: Optional[AgentGraph] = Field(None, description="Graph nodes and connections")
 
 
+class CreateNodeOperation(BaseModel):
+    """Operation to create a node in the agent graph."""
+    op: Literal["create_node"] = "create_node"
+    node_type_id: str = Field(..., description="Node type UUID to instantiate")
+    temp_ref_id: Optional[str] = Field(None, description="Request-scoped temporary reference for this node")
+    params_used: Optional[dict] = Field(None, description="Initial node parameters")
+
+
+class UpdateNodeOperation(BaseModel):
+    """Operation to update an existing node's parameters."""
+    op: Literal["update_node"] = "update_node"
+    agent_node_id: str = Field(..., description="Existing persisted node ID to update")
+    params_used: dict = Field(..., description="Parameter patch object merged into current node params")
+
+
+class DeleteNodeOperation(BaseModel):
+    """Operation to delete a node from the agent graph."""
+    op: Literal["delete_node"] = "delete_node"
+    agent_node_id: str = Field(..., description="Existing persisted node ID to delete")
+
+
+class CreateConnectionOperation(BaseModel):
+    """Operation to create a connection between nodes."""
+    op: Literal["create_connection"] = "create_connection"
+    source_agent_node_id: Optional[str] = Field(None, description="Source existing node ID")
+    source_temp_ref_id: Optional[str] = Field(None, description="Source temp ref from earlier operation")
+    target_agent_node_id: Optional[str] = Field(None, description="Target existing node ID")
+    target_temp_ref_id: Optional[str] = Field(None, description="Target temp ref from earlier operation")
+
+
+class DeleteConnectionOperation(BaseModel):
+    """Operation to delete a connection between nodes."""
+    op: Literal["delete_connection"] = "delete_connection"
+    source_agent_node_id: Optional[str] = Field(None, description="Source existing node ID")
+    source_temp_ref_id: Optional[str] = Field(None, description="Source temp ref from earlier operation")
+    target_agent_node_id: Optional[str] = Field(None, description="Target existing node ID")
+    target_temp_ref_id: Optional[str] = Field(None, description="Target temp ref from earlier operation")
+
+
+# Union type for graph operations
+GraphOperation = CreateNodeOperation | UpdateNodeOperation | DeleteNodeOperation | CreateConnectionOperation | DeleteConnectionOperation
+
+
 class UpdateAgentRequest(BaseModel):
     """Request to update an existing agent."""
     agent_id: str = Field(..., description="Agent ID to update")
     name: Optional[str] = Field(None, max_length=120, description="Agent name")
     description: Optional[str] = Field(None, max_length=5000, description="Agent description")
     visibility: Optional[Visibility] = Field(None, description="Public or private visibility")
-    graph: Optional[AgentGraph] = Field(None, description="Full replacement graph")
+    operations: Optional[list[GraphOperation]] = Field(None, description="Ordered graph operations for node/connection mutations")
+
+
+class DuplicateAgentRequest(BaseModel):
+    """Request to duplicate an agent."""
+    agent_id: str = Field(..., description="Agent ID to duplicate")
+    name: Optional[str] = Field(None, max_length=120, description="Name for the duplicated agent")
+    description: Optional[str] = Field(None, max_length=5000, description="Description override")
+    visibility: Optional[Visibility] = Field(None, description="Visibility override")
 
 
 class DeleteAgentRequest(BaseModel):
@@ -112,6 +163,11 @@ class ListAgentsRequest(BaseModel):
 class GetAgentRequest(BaseModel):
     """Request to get an agent."""
     agent_id: str = Field(..., description="Agent ID to retrieve")
+
+
+class WhoAmIRequest(BaseModel):
+    """Request to validate API key and get organization info."""
+    pass  # No parameters required
 
 
 # =============================================================================
@@ -193,6 +249,16 @@ class GetAgentNodeRequest(BaseModel):
     node_id: str = Field(..., description="Node type ID or agent node instance ID")
 
 
+class GetNodeTypeRequest(BaseModel):
+    """Request to get node type from the public catalog."""
+    node_type_id: str = Field(..., description="Node type UUID")
+
+
+class GetAgentRunNodesRequest(BaseModel):
+    """Request to get node-level details for a run."""
+    run_id: str = Field(..., description="Run ID to get node details for")
+
+
 # =============================================================================
 # Request Models - Triggers
 # =============================================================================
@@ -258,6 +324,13 @@ class UploadImageRequest(BaseModel):
 class GetCreditsRequest(BaseModel):
     """Request to get credit balance."""
     pass  # No parameters required
+
+
+class GetCreditUsageRequest(BaseModel):
+    """Request to get credit usage breakdown."""
+    start_date: Optional[str] = Field(None, description="ISO date/datetime start bound (defaults to 30 days before end_date)")
+    end_date: Optional[str] = Field(None, description="ISO date/datetime end bound (defaults to now)")
+    limit: Optional[int] = Field(5000, ge=1, le=10000, description="Max raw usage events scanned (1-10,000)")
 
 
 class BuyCreditsRequest(BaseModel):
@@ -345,6 +418,15 @@ class DeleteSocialPostRequest(BaseModel):
 # Response Models
 # =============================================================================
 
+class WhoAmIResponse(BaseModel):
+    """Response for whoami endpoint."""
+    organization_id: str
+    organization_name: str
+    organization_slug: str
+    created_at: str
+    last_used_at: Optional[str] = None
+
+
 class AgentSummary(BaseModel):
     """Summary of an agent."""
     id: str
@@ -408,16 +490,31 @@ class CreateAgentResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class CreatedNode(BaseModel):
+    """Node created during an update operation."""
+    temp_ref_id: Optional[str] = None
+    agent_node_id: str
+
+
 class UpdateAgentResponse(BaseModel):
     """Response for update agent."""
     success: bool
     agent_id: str
+    operations_applied: Optional[int] = None
+    created_nodes: Optional[list[CreatedNode]] = None
     name: Optional[str] = None
     description: Optional[str] = None
     visibility: Optional[str] = None
     workspace_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class DuplicateAgentResponse(BaseModel):
+    """Response for duplicate agent."""
+    agent: AgentDetails
+    agent_nodes: list[NodeDetails]
+    connections: list[ConnectionDetails]
 
 
 class DeleteAgentResponse(BaseModel):
@@ -533,6 +630,36 @@ class GetAgentNodeResponse(BaseModel):
     agent_node: NodeType
 
 
+class NodeTypeInfo(BaseModel):
+    """Node type from the public catalog."""
+    node_type_id: str
+    node_type_name: Optional[str] = None
+    docs_url: Optional[str] = None
+    params_docs_url: Optional[str] = None
+
+
+class GetNodeTypeResponse(BaseModel):
+    """Response for get node type."""
+    node_type: NodeTypeInfo
+
+
+class RunNodeStatus(BaseModel):
+    """Status of a node in a run."""
+    agent_node_id: str
+    node_type_id: Optional[str] = None
+    node_type_name: Optional[str] = None
+    status: str
+    status_message: Optional[str] = None
+    needs_credits: Optional[bool] = None
+    error: Optional[str] = None
+
+
+class GetAgentRunNodesResponse(BaseModel):
+    """Response for get agent run nodes."""
+    run_id: str
+    nodes: list[RunNodeStatus]
+
+
 class YouTubeChannelDetails(BaseModel):
     """YouTube channel details."""
     channel_id: str
@@ -646,6 +773,60 @@ class BuyCreditsResponse(BaseModel):
     amount_charged_usd: Optional[float] = None
     plan: Optional[str] = None
     checkout_url: Optional[str] = None
+
+
+class TileUsage(BaseModel):
+    """Credit usage by tile."""
+    tile_id: str
+    tile_name: Optional[str] = None
+    credits_used: int
+    events: int
+
+
+class DateUsage(BaseModel):
+    """Credit usage by date."""
+    date: str
+    credits_used: int
+    events: int
+
+
+class DateTileUsage(BaseModel):
+    """Credit usage by date and tile."""
+    date: str
+    tile_id: str
+    tile_name: Optional[str] = None
+    credits_used: int
+    events: int
+
+
+class UsageBreakdown(BaseModel):
+    """Credit usage breakdown."""
+    by_tile: list[TileUsage] = Field(default_factory=list)
+    by_date: list[DateUsage] = Field(default_factory=list)
+    by_date_and_tile: list[DateTileUsage] = Field(default_factory=list)
+
+
+class UsageSummary(BaseModel):
+    """Summary of credit usage."""
+    total_credits_used: int
+    total_events: int
+    matching_events: int
+    returned_events: int
+    truncated: bool
+
+
+class DateRange(BaseModel):
+    """Date range for usage query."""
+    start_date: str
+    end_date: str
+
+
+class GetCreditUsageResponse(BaseModel):
+    """Response for get credit usage."""
+    organization_id: str
+    date_range: DateRange
+    summary: UsageSummary
+    breakdown: UsageBreakdown
 
 
 class PlanInfo(BaseModel):
@@ -919,6 +1100,18 @@ class MosaicClient:
         result = await self._request("GET", f"/agent/{request.agent_id}")
         return GetAgentResponse(**result)
     
+    async def duplicate_agent(self, request: DuplicateAgentRequest) -> DuplicateAgentResponse:
+        """Duplicate an agent with all its nodes and connections."""
+        agent_id = request.agent_id
+        data = request.model_dump(exclude_none=True, exclude={"agent_id"})
+        result = await self._request("POST", f"/agent/{agent_id}/duplicate", json_data=data if data else None)
+        return DuplicateAgentResponse(**result)
+    
+    async def whoami(self, request: WhoAmIRequest) -> WhoAmIResponse:
+        """Validate API key and get organization info."""
+        result = await self._request("GET", "/whoami")
+        return WhoAmIResponse(**result)
+    
     # =========================================================================
     # Agent Runs
     # =========================================================================
@@ -977,6 +1170,11 @@ class MosaicClient:
         result = await self._request("GET", f"/trigger/{request.trigger_id}/runs", params=params)
         return ListAgentRunsResponse(**result)
     
+    async def get_agent_run_nodes(self, request: GetAgentRunNodesRequest) -> GetAgentRunNodesResponse:
+        """Get node-level details for a run including credit-blocked status."""
+        result = await self._request("GET", f"/agent_run/{request.run_id}/nodes")
+        return GetAgentRunNodesResponse(**result)
+    
     # =========================================================================
     # Agent Nodes
     # =========================================================================
@@ -990,6 +1188,11 @@ class MosaicClient:
         """Get node type details."""
         result = await self._request("GET", f"/agent_nodes/{request.node_id}")
         return GetAgentNodeResponse(**result)
+    
+    async def get_node_type(self, request: GetNodeTypeRequest) -> GetNodeTypeResponse:
+        """Get node type from the public catalog."""
+        result = await self._request("GET", f"/node_type/{request.node_type_id}")
+        return GetNodeTypeResponse(**result)
     
     # =========================================================================
     # Triggers
@@ -1153,6 +1356,12 @@ class MosaicClient:
         """Get organization credit balance."""
         result = await self._request("GET", "/credits")
         return GetCreditsResponse(**result)
+    
+    async def get_credit_usage(self, request: GetCreditUsageRequest) -> GetCreditUsageResponse:
+        """Get credit usage breakdown by tile and date."""
+        params = request.model_dump(exclude_none=True)
+        result = await self._request("GET", "/credits/usage", params=params)
+        return GetCreditUsageResponse(**result)
     
     async def buy_credits(self, request: BuyCreditsRequest) -> BuyCreditsResponse:
         """Purchase top-up credits."""

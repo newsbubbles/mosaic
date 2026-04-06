@@ -1,6 +1,7 @@
 # Environment
 .env
 *.log
+.variables.json
 
 # Python
 __pycache__/

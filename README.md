@@ -107,14 +107,16 @@ mosaic/
 └── README.md
 ```
 
-## Available Tools (38 total)
+## Available Tools (44 total)
 
 ### Agents
 - `mosaic_create_agent` - Create a new video workflow
-- `mosaic_update_agent` - Update agent settings
+- `mosaic_update_agent` - Update agent settings (supports operations-based graph mutations)
 - `mosaic_delete_agent` - Delete an agent
+- `mosaic_duplicate_agent` - Duplicate an agent with all nodes and connections
 - `mosaic_list_agents` - List all agents
 - `mosaic_get_agent` - Get agent details with nodes
+- `mosaic_whoami` - Validate API key and get organization info
 
 ### Agent Runs
 - `mosaic_run_agent` - Execute an agent on videos
@@ -123,10 +125,12 @@ mosaic/
 - `mosaic_list_agent_runs` - List runs for an agent
 - `mosaic_list_all_agent_runs` - List all runs
 - `mosaic_list_trigger_runs` - List trigger-initiated runs
+- `mosaic_get_agent_run_nodes` - Get node-level details for a run
 
 ### Agent Nodes
 - `mosaic_list_agent_nodes` - List available node types
 - `mosaic_get_agent_node` - Get node type details
+- `mosaic_get_node_type` - Get node type from public catalog
 
 ### Triggers
 - `mosaic_list_agent_triggers` - List YouTube triggers
@@ -143,6 +147,7 @@ mosaic/
 
 ### Credits
 - `mosaic_get_credits` - Get credit balance
+- `mosaic_get_credit_usage` - Get credit usage breakdown by tile and date
 - `mosaic_buy_credits` - Purchase credits
 
 ### Plan

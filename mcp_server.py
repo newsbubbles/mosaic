@@ -24,11 +24,15 @@ from client import (
     CreateAgentRequest,
     UpdateAgentRequest,
     DeleteAgentRequest,
+    DuplicateAgentRequest,
     ListAgentsRequest,
     GetAgentRequest,
-    GraphNode,
-    GraphConnection,
-    AgentGraph,
+    WhoAmIRequest,
+    CreateNodeOperation,
+    UpdateNodeOperation,
+    DeleteNodeOperation,
+    CreateConnectionOperation,
+    DeleteConnectionOperation,
     # Run requests
     RunAgentRequest,
     GetAgentRunRequest,
@@ -36,10 +40,12 @@ from client import (
     ListAgentRunsRequest,
     ListAllAgentRunsRequest,
     ListTriggerRunsRequest,
+    GetAgentRunNodesRequest,
     VideoInput,
     # Node requests
     ListAgentNodesRequest,
     GetAgentNodeRequest,
+    GetNodeTypeRequest,
     # Trigger requests
     ListAgentTriggersRequest,
     AddYouTubeChannelsRequest,
@@ -53,6 +59,7 @@ from client import (
     UploadImageRequest,
     # Credits requests
     GetCreditsRequest,
+    GetCreditUsageRequest,
     BuyCreditsRequest,
     # Plan requests
     GetPlanRequest,
@@ -168,6 +175,19 @@ class MosaicGetAgentRequest(BaseModel):
     agent_id: str = Field(..., description="Agent ID to retrieve")
 
 
+class MosaicDuplicateAgentRequest(BaseModel):
+    """Request to duplicate an agent."""
+    agent_id: str = Field(..., description="Agent ID to duplicate")
+    name: Optional[str] = Field(None, max_length=120, description="Name for the duplicated agent")
+    description: Optional[str] = Field(None, max_length=5000, description="Description override")
+    visibility: Optional[Literal["public", "private"]] = Field(None, description="Visibility override")
+
+
+class MosaicWhoAmIRequest(BaseModel):
+    """Request to validate API key and get organization info."""
+    pass
+
+
 # =============================================================================
 # Request Models - Agent Runs
 # =============================================================================
@@ -221,6 +241,11 @@ class MosaicListTriggerRunsRequest(BaseModel):
     to_date: Optional[str] = Field(None, description="ISO timestamp upper bound")
 
 
+class MosaicGetAgentRunNodesRequest(BaseModel):
+    """Request to get node-level details for a run."""
+    run_id: str = Field(..., description="Run ID to get node details for")
+
+
 # =============================================================================
 # Request Models - Agent Nodes
 # =============================================================================
@@ -233,6 +258,11 @@ class MosaicListAgentNodesRequest(BaseModel):
 class MosaicGetAgentNodeRequest(BaseModel):
     """Request to get node type details."""
     node_id: str = Field(..., description="Node type ID or agent node instance ID")
+
+
+class MosaicGetNodeTypeRequest(BaseModel):
+    """Request to get node type from public catalog."""
+    node_type_id: str = Field(..., description="Node type UUID")
 
 
 # =============================================================================
@@ -300,6 +330,13 @@ class MosaicUploadImageRequest(BaseModel):
 class MosaicGetCreditsRequest(BaseModel):
     """Request to get credit balance."""
     pass
+
+
+class MosaicGetCreditUsageRequest(BaseModel):
+    """Request to get credit usage breakdown."""
+    start_date: Optional[str] = Field(None, description="ISO date/datetime start bound")
+    end_date: Optional[str] = Field(None, description="ISO date/datetime end bound")
+    limit: Optional[int] = Field(5000, ge=1, le=10000, description="Max raw usage events scanned")
 
 
 class MosaicBuyCreditsRequest(BaseModel):
@@ -493,6 +530,46 @@ async def mosaic_get_agent(request: MosaicGetAgentRequest, ctx: Context) -> dict
         return {"error": str(e)}
 
 
+@mcp.tool()
+async def mosaic_duplicate_agent(request: MosaicDuplicateAgentRequest, ctx: Context) -> dict[str, Any]:
+    """Duplicate an agent with all its nodes and connections.
+    
+    Creates a new agent by copying the source template's metadata, nodes, and connections.
+    """
+    logger.info(f"Duplicating agent: {request.agent_id}")
+    try:
+        client = ctx.request_context.lifespan_context.client
+        
+        visibility = Visibility(request.visibility) if request.visibility else None
+        
+        result = await client.duplicate_agent(DuplicateAgentRequest(
+            agent_id=request.agent_id,
+            name=request.name,
+            description=request.description,
+            visibility=visibility
+        ))
+        return result.model_dump()
+    except Exception as e:
+        logger.error(f"Failed to duplicate agent: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def mosaic_whoami(request: MosaicWhoAmIRequest, ctx: Context) -> dict[str, Any]:
+    """Validate API key and get organization information.
+    
+    Returns organization ID, name, slug, and API key creation/last used timestamps.
+    """
+    logger.info("Getting whoami info")
+    try:
+        client = ctx.request_context.lifespan_context.client
+        result = await client.whoami(WhoAmIRequest())
+        return result.model_dump()
+    except Exception as e:
+        logger.error(f"Failed to get whoami: {e}")
+        return {"error": str(e)}
+
+
 # =============================================================================
 # Tools - Agent Runs
 # =============================================================================
@@ -613,6 +690,23 @@ async def mosaic_list_trigger_runs(request: MosaicListTriggerRunsRequest, ctx: C
         return {"error": str(e)}
 
 
+@mcp.tool()
+async def mosaic_get_agent_run_nodes(request: MosaicGetAgentRunNodesRequest, ctx: Context) -> dict[str, Any]:
+    """Get node-level details for a run.
+    
+    Returns status and credit-blocked details for each node in the run.
+    Useful for debugging run issues.
+    """
+    logger.info(f"Getting run nodes: {request.run_id}")
+    try:
+        client = ctx.request_context.lifespan_context.client
+        result = await client.get_agent_run_nodes(GetAgentRunNodesRequest(run_id=request.run_id))
+        return result.model_dump()
+    except Exception as e:
+        logger.error(f"Failed to get run nodes: {e}")
+        return {"error": str(e)}
+
+
 # =============================================================================
 # Tools - Agent Nodes
 # =============================================================================
@@ -644,6 +738,22 @@ async def mosaic_get_agent_node(request: MosaicGetAgentNodeRequest, ctx: Context
         return result.model_dump()
     except Exception as e:
         logger.error(f"Failed to get node: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def mosaic_get_node_type(request: MosaicGetNodeTypeRequest, ctx: Context) -> dict[str, Any]:
+    """Get node type from the public catalog.
+    
+    Returns node type details including documentation URLs.
+    """
+    logger.info(f"Getting node type: {request.node_type_id}")
+    try:
+        client = ctx.request_context.lifespan_context.client
+        result = await client.get_node_type(GetNodeTypeRequest(node_type_id=request.node_type_id))
+        return result.model_dump()
+    except Exception as e:
+        logger.error(f"Failed to get node type: {e}")
         return {"error": str(e)}
 
 
@@ -830,6 +940,27 @@ async def mosaic_get_credits(request: MosaicGetCreditsRequest, ctx: Context) -> 
         return result.model_dump()
     except Exception as e:
         logger.error(f"Failed to get credits: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def mosaic_get_credit_usage(request: MosaicGetCreditUsageRequest, ctx: Context) -> dict[str, Any]:
+    """Get credit usage breakdown by tile and date.
+    
+    Returns aggregated credit usage over a date range with breakdowns
+    by tile, by date, and by both date and tile.
+    """
+    logger.info("Getting credit usage")
+    try:
+        client = ctx.request_context.lifespan_context.client
+        result = await client.get_credit_usage(GetCreditUsageRequest(
+            start_date=request.start_date,
+            end_date=request.end_date,
+            limit=request.limit
+        ))
+        return result.model_dump()
+    except Exception as e:
+        logger.error(f"Failed to get credit usage: {e}")
         return {"error": str(e)}
 
 
